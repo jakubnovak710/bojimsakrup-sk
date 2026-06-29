@@ -285,21 +285,21 @@ export function HailMap({ riskBySlug, cells = [], className = '' }: Props) {
         </div>
       )}
 
-      {/* Legenda rizika krajov */}
-      <div className="absolute bottom-3 left-3 z-10 bg-white/95 border border-[#E5E7EB] rounded-lg px-2.5 py-2">
-        <div className="text-[9px] text-[#94A3B8] uppercase tracking-wide mb-1">Riziko krajov</div>
-        <div className="flex items-center gap-1.5">
+      {/* Legenda rizika krajov — horný ľavý rohh, mimo cesty timeline */}
+      <div className="absolute top-3 left-3 z-10 bg-white/95 border border-[#E5E7EB] rounded-lg px-2 py-1.5 max-w-[160px] sm:max-w-none">
+        <div className="text-[8px] text-[#94A3B8] uppercase tracking-wide mb-1">Riziko krajov</div>
+        <div className="flex items-center gap-1 sm:gap-1.5">
           {(['none', 'low', 'medium', 'high', 'extreme'] as RiskLevel[]).map(level => (
             <div key={level} className="flex flex-col items-center gap-0.5">
-              <span className="w-3 h-3 rounded-sm" style={{ background: RISK[level].map }} />
-              <span className="text-[9px]" style={{ color: RISK[level].text }}>
+              <span className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-sm" style={{ background: RISK[level].map }} />
+              <span className="text-[7px] sm:text-[9px] hidden sm:block" style={{ color: RISK[level].text }}>
                 {RISK[level].label.split(' ')[0]}
               </span>
             </div>
           ))}
         </div>
         {/* Radar intenzita */}
-        <div className="text-[9px] text-[#94A3B8] uppercase tracking-wide mt-2 mb-1">Radar (dBZ)</div>
+        <div className="text-[8px] text-[#94A3B8] uppercase tracking-wide mt-1.5 mb-1">Radar (dBZ)</div>
         <div className="flex items-center gap-0.5">
           {[
             { color: '#00BFFF', label: '15' },
@@ -310,8 +310,8 @@ export function HailMap({ riskBySlug, cells = [], className = '' }: Props) {
             { color: '#CC00CC', label: '65+' },
           ].map(({ color, label }) => (
             <div key={label} className="flex flex-col items-center gap-0.5">
-              <span className="w-4 h-3 rounded-sm block" style={{ background: color }} />
-              <span className="text-[8px] text-[#64748B]">{label}</span>
+              <span className="w-3 h-2.5 sm:w-4 sm:h-3 rounded-sm block" style={{ background: color }} />
+              <span className="text-[6px] sm:text-[8px] text-[#64748B] hidden sm:block">{label}</span>
             </div>
           ))}
         </div>

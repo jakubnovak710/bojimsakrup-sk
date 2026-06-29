@@ -5,7 +5,7 @@ import { JsonLd } from '@/components/JsonLd'
 import { RISK, type RiskLevel } from '@/lib/types'
 import { fetchStormCells } from '@/lib/cells-api'
 import { dbzToColor, dbzToRisk } from '@/lib/storm-cells'
-import { fetchAllKrajeWeather, weatherToRiskBySlug, wmoLabel } from '@/lib/weather-api'
+import { fetchAllKrajeWeather, weatherToRiskBySlug, wmoLabel, hourLabel } from '@/lib/weather-api'
 import Link from 'next/link'
 
 const BASE = 'https://bojimsakrup.sk'
@@ -13,6 +13,7 @@ const BASE = 'https://bojimsakrup.sk'
 export const revalidate = 900
 
 const RISK_ORDER: RiskLevel[] = ['extreme', 'high', 'medium', 'low', 'none']
+const RISK_NUM_STRIP: Record<RiskLevel, number> = { none: 0, low: 1, medium: 2, high: 3, extreme: 4 }
 
 const HAZARDS = [
   { label: 'Krúpy',          key: 'krupy'  as const, Icon: CloudHail },
@@ -47,8 +48,7 @@ export default async function HomePage() {
     (acc, r) => { acc[r] = (acc[r] ?? 0) + 1; return acc },
     {} as Record<RiskLevel, number>
   )
-  const RISK_NUM: Record<RiskLevel, number> = { none: 0, low: 1, medium: 2, high: 3, extreme: 4 }
-  const worstKraj = krajeWeather.sort((a, b) => RISK_NUM[b.risk] - RISK_NUM[a.risk])[0]
+  const worstKraj = [...krajeWeather].sort((a, b) => RISK_NUM_STRIP[b.risk] - RISK_NUM_STRIP[a.risk])[0]
   const updatedAt = krajeWeather[0]?.updatedAt ?? new Date().toISOString()
 
   const websiteJsonLd = {
@@ -88,13 +88,16 @@ export default async function HomePage() {
           </span>
         </div>
 
-        {/* Top kraje s rizikom */}
+        {/* Top kraje s rizikom — AKTUÁLNY stav, nie predpoveď */}
         {krajeWeather.slice(0, 4).map(k => (
           <Link key={k.slug} href={`/${k.slug}`}
             className="flex items-center gap-2 px-4 border-r border-[#E5E7EB] h-full flex-shrink-0 hover:bg-[#F8FAFC] transition-colors cursor-pointer">
             <RiskBadge level={k.risk} />
             <span className="text-[11px] text-[#64748B] whitespace-nowrap">
-              {wmoLabel(k.wmoCode)} · CAPE {k.capePeak}
+              {wmoLabel(k.wmoCode)} {k.tempC}°C
+              {RISK_NUM_STRIP[k.riskPeak] > RISK_NUM_STRIP[k.risk] && (
+                <span className="text-[#FB923C]"> · vrchol {hourLabel(k.capePeakHour)}</span>
+              )}
             </span>
           </Link>
         ))}
@@ -220,7 +223,12 @@ export default async function HomePage() {
                   <div className="text-[13px] font-medium text-[#0F172A] capitalize">
                     {k.slug.replace('-kraj','').replace('sky','ský').replace('ky','ký')}
                   </div>
-                  <div className="text-[11px] text-[#64748B]">{wmoLabel(k.wmoCode)} · CAPE {k.capePeak} J/kg</div>
+                  <div className="text-[11px] text-[#64748B]">
+                    {wmoLabel(k.wmoCode)} · {k.tempC}°C
+                    {RISK_NUM_STRIP[k.riskPeak] > RISK_NUM_STRIP[k.risk] && (
+                      <span className="text-[#FB923C]"> · vrchol {hourLabel(k.capePeakHour)}</span>
+                    )}
+                  </div>
                 </div>
                 <RiskBadge level={k.risk} />
               </Link>
