@@ -6,6 +6,7 @@ import { MOCK_KRAJE, getSlovakiaSummary } from '@/lib/mock-data'
 import { RISK, type RiskLevel } from '@/lib/types'
 import { fetchStormCells } from '@/lib/cells-api'
 import { dbzToColor, dbzToRisk } from '@/lib/storm-cells'
+import { deriveRiskBySlug, mergeRisk } from '@/lib/risk-from-cells'
 import Link from 'next/link'
 
 const BASE = 'https://bojimsakrup.sk'
@@ -34,10 +35,14 @@ function formatTime(iso: string) {
 
 export default async function HomePage() {
   const summary = getSlovakiaSummary()
-  const riskBySlug: Record<string, RiskLevel> = {}
-  for (const k of MOCK_KRAJE) riskBySlug[k.slug] = k.risk
-
   const cells = await fetchStormCells()
+
+  // Odvoď riziko z reálnych buniek — prepisuje mock hodnoty kde máme dáta
+  const realRisk = deriveRiskBySlug(cells)
+  const riskBySlug = mergeRisk(
+    Object.fromEntries(MOCK_KRAJE.map(k => [k.slug, k.risk])),
+    realRisk,
+  )
 
   const websiteJsonLd = {
     '@context': 'https://schema.org',

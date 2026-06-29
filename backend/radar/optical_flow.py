@@ -13,9 +13,15 @@ from scipy.ndimage import label, maximum_filter, minimum_filter
 from .rainviewer import RadarFrame
 
 
-DBZ_THRESHOLD = 35.0    # minimálna intenzita pre deteciu bunky (rain)
+DBZ_THRESHOLD = 30.0    # minimálna intenzita pre deteciu bunky (rain)
 HAIL_DBZ = 50.0         # prah pre riziko krupobitia
-MIN_CELL_AREA_PX = 20   # minimum pixelov — filtruje šum
+MIN_CELL_AREA_PX = 20   # minimum pixelov pri zoom 6 (cca 30 km²)
+
+# Slovensko + 250 km buffer — filtrujeme len relevantné bunky
+_SK_LAT_MIN = 46.8
+_SK_LAT_MAX = 51.0
+_SK_LON_MIN = 14.5
+_SK_LON_MAX = 24.5
 
 
 @dataclass
@@ -81,13 +87,20 @@ def detect_cells(frame: RadarFrame, prev_frame: RadarFrame | None = None) -> lis
         ys, xs = np.where(region)
         cy = float(ys.mean())
         cx = float(xs.mean())
+        # max dBZ pre threshold kontrolu, mean pre reporting (lepší odhad intenzity bunky)
         max_dbz = float(data[region].max())
+        mean_dbz = float(data[region][data[region] > 0].mean()) if (data[region] > 0).any() else max_dbz
 
         lat, lon = _px_to_latlon(cx, cy, frame)
 
+        # Ignoruj bunky mimo SK + buffer oblasti
+        if not (_SK_LAT_MIN <= lat <= _SK_LAT_MAX and _SK_LON_MIN <= lon <= _SK_LON_MAX):
+            continue
+
         cells.append({
             "centroid_px": (cx, cy),
-            "dbz": max_dbz,
+            "dbz": round(mean_dbz, 1),
+            "dbz_max": round(max_dbz, 1),
             "area_px": area,
             "lat": lat,
             "lon": lon,
