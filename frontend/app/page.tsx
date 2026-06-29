@@ -1,11 +1,11 @@
-import { Shield, Bell, CloudHail, CloudLightning, Wind, CloudRain } from 'lucide-react'
+import { Bell, CloudHail, CloudLightning, Wind, CloudRain } from 'lucide-react'
 import { HailMap } from '@/components/HailMap'
 import { RiskBadge } from '@/components/RiskBadge'
-import { HazardBar } from '@/components/HazardBar'
 import { JsonLd } from '@/components/JsonLd'
 import { MOCK_KRAJE, getSlovakiaSummary } from '@/lib/mock-data'
 import { RISK, type RiskLevel } from '@/lib/types'
 import { fetchStormCells } from '@/lib/cells-api'
+import { dbzToColor, dbzToRisk } from '@/lib/storm-cells'
 import Link from 'next/link'
 
 const BASE = 'https://bojimsakrup.sk'
@@ -13,6 +13,20 @@ const BASE = 'https://bojimsakrup.sk'
 export const revalidate = 900
 
 const RISK_ORDER: RiskLevel[] = ['extreme', 'high', 'medium', 'low', 'none']
+
+const HAZARDS = [
+  { label: 'Krúpy',          key: 'krupy'  as const, Icon: CloudHail },
+  { label: 'Búrky',          key: 'burky'  as const, Icon: CloudLightning },
+  { label: 'Silný vietor',   key: 'vietor' as const, Icon: Wind },
+  { label: 'Prívalový dážď', key: 'dazd'   as const, Icon: CloudRain },
+]
+
+function barColor(v: number) {
+  if (v >= 70) return '#EF4444'
+  if (v >= 45) return '#FB923C'
+  if (v >= 20) return '#FACC15'
+  return '#22C55E'
+}
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString('sk-SK', { hour: '2-digit', minute: '2-digit' })
@@ -30,179 +44,211 @@ export default async function HomePage() {
     '@type': 'WebSite',
     name: 'BojímSaKrúp.sk',
     url: BASE,
-    description: 'Monitoring krupobitia a búrok na Slovensku. Radarová analýza búrkových buniek, CAPE index a pohyb búrkových buniek. Pokrytie celého Slovenska.',
+    description: 'Monitoring krupobitia a búrok na Slovensku.',
     inLanguage: 'sk',
-    potentialAction: {
-      '@type': 'SearchAction',
-      target: { '@type': 'EntryPoint', urlTemplate: `${BASE}/search?q={search_term_string}` },
-      'query-input': 'required name=search_term_string',
-    },
   }
 
   return (
     <>
-    <JsonLd data={websiteJsonLd} />
-    <div className="flex flex-col">
+      <JsonLd data={websiteJsonLd} />
 
-      {/* ── Mobile header (TopNav replaces on desktop) ── */}
-      <header className="lg:hidden flex items-center justify-between px-4 pt-5 pb-4 bg-white border-b border-[#E5E7EB]">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-[#A3113A] flex items-center justify-center flex-shrink-0">
-            <Shield size={18} color="white" strokeWidth={2} />
+      {/* ── MOBILE HEADER ──────────────────────────────────────────────── */}
+      <header className="lg:hidden flex items-center justify-between px-4 pt-5 pb-3 bg-white border-b border-[#E5E7EB]">
+        <div>
+          <div className="text-[16px] font-bold text-[#0F172A] tracking-tight leading-none">
+            BOJÍMSA<span className="text-[#A3113A]">KRÚP</span>.SK
           </div>
-          <div>
-            <div className="text-[15px] font-bold text-[#0F172A] tracking-tight leading-none">
-              BOJÍMSA<span className="text-[#A3113A]">KRÚP</span>.SK
-            </div>
-            <div className="text-[11px] text-[#64748B] mt-0.5">Monitoring počasia na Slovensku</div>
-          </div>
+          <div className="text-[11px] text-[#64748B] mt-0.5">Akt. {formatTime(summary.updatedAt)}</div>
         </div>
-        <button className="w-9 h-9 rounded-lg border border-[#E5E7EB] flex items-center justify-center cursor-pointer hover:bg-[#F8FAFC] transition-colors duration-150" aria-label="Upozornenia">
-          <Bell size={16} className="text-[#64748B]" strokeWidth={1.75} />
-        </button>
+        <div className="flex items-center gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-sm bg-[#EF4444] animate-pulse" />
+          <span className="text-[11px] font-semibold text-[#0F172A]">LIVE</span>
+        </div>
       </header>
 
-      {/* ── Desktop hero strip (hidden on mobile) ── */}
-      <div className="hidden lg:block bg-white border-b border-[#E5E7EB] px-6 py-5">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-[#0F172A] tracking-tight">Prehľad rizika krupobitia</h1>
-            <p className="text-sm text-[#64748B] mt-0.5">Slovenská republika · Aktualizácia každých 15 minút · Akt. {formatTime(summary.updatedAt)}</p>
-          </div>
+      {/* ── DESKTOP STRIP ──────────────────────────────────────────────── */}
+      <div className="hidden lg:flex items-center border-b border-[#E5E7EB] bg-white h-11">
+        {/* Live indikátor + čas */}
+        <div className="flex items-center gap-2 px-5 border-r border-[#E5E7EB] h-full flex-shrink-0">
+          <span className="w-1.5 h-1.5 rounded-sm bg-[#EF4444] animate-pulse" />
+          <span className="text-[12px] font-semibold text-[#0F172A] whitespace-nowrap">
+            {formatTime(summary.updatedAt)}
+          </span>
+        </div>
+
+        {/* Hazardy s mini progress barmi */}
+        {HAZARDS.map(({ label, key, Icon }) => {
+          const val = summary.totalHazards[key]
+          const color = barColor(val)
+          return (
+            <div key={key} className="flex items-center gap-2 px-4 border-r border-[#E5E7EB] h-full flex-shrink-0">
+              <Icon size={13} strokeWidth={1.75} className="text-[#94A3B8]" />
+              <span className="text-[12px] text-[#64748B] whitespace-nowrap">{label}</span>
+              <div className="w-14 h-1 rounded-full bg-[#E5E7EB] overflow-hidden">
+                <div className="h-full rounded-full" style={{ width: `${val}%`, background: color }} />
+              </div>
+              <span className="text-[12px] font-semibold tabular-nums" style={{ color }}>{val}%</span>
+            </div>
+          )
+        })}
+
+        <div className="flex-1" />
+
+        {/* Najhoršie riziko */}
+        <div className="flex items-center gap-2.5 px-5 border-l border-[#E5E7EB] h-full flex-shrink-0">
+          <span className="text-[11px] text-[#64748B]">Najvyššie</span>
+          <span className="text-[12px] font-semibold text-[#0F172A]">{summary.worst.name}</span>
           <RiskBadge level={summary.worst.risk} />
         </div>
       </div>
 
-      {/* ── Mobile: Risk strip ── */}
-      <div className="lg:hidden bg-white px-4 py-3.5 border-b border-[#E5E7EB]">
-        <div className="flex items-center justify-between mb-2.5">
-          <span className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wider">Prehľad rizika</span>
-          <span className="text-[11px] text-[#64748B]">Akt. {formatTime(summary.updatedAt)}</span>
-        </div>
-        <div className="grid grid-cols-5 gap-1.5">
+      {/* ── MOBILE RISK TILES ──────────────────────────────────────────── */}
+      <div className="lg:hidden grid grid-cols-5 gap-px bg-[#E5E7EB] border-b border-[#E5E7EB]">
+        {RISK_ORDER.map(level => (
+          <div key={level} className="flex flex-col items-center gap-0.5 py-2.5 bg-white">
+            <span className="text-[15px] font-bold leading-none text-[#0F172A]">
+              {summary.counts[level] ?? 0}
+            </span>
+            <span className="w-2 h-2 rounded-sm mt-0.5" style={{ background: RISK[level].indicator }} />
+          </div>
+        ))}
+      </div>
+
+      {/* ── MAPA — fullwidth ────────────────────────────────────────────── */}
+      <HailMap
+        riskBySlug={riskBySlug}
+        cells={cells}
+        className="w-full h-[56vw] max-h-[75vh] min-h-[300px] lg:h-[calc(100vh-11.5rem)]"
+      />
+
+      {/* ── DESKTOP BOTTOM PANEL ────────────────────────────────────────── */}
+      <div className="hidden lg:flex items-stretch bg-white border-t border-[#E5E7EB] divide-x divide-[#E5E7EB]">
+
+        {/* Risk počty */}
+        <div className="flex items-center gap-5 px-6 py-3.5 flex-shrink-0">
           {RISK_ORDER.map(level => (
-            <div key={level} className="flex flex-col items-center gap-1 py-2 rounded-lg border border-[#E5E7EB] bg-[#F8FAFC]">
-              <span className="text-base font-bold text-[#0F172A] leading-none">{summary.counts[level] ?? 0}</span>
-              <span className="text-[9px] font-semibold text-center leading-tight" style={{ color: RISK[level].text }}>
+            <div key={level} className="flex flex-col items-center gap-1">
+              <span className="text-xl font-bold leading-none text-[#0F172A]">{summary.counts[level] ?? 0}</span>
+              <span className="w-2 h-2 rounded-sm" style={{ background: RISK[level].indicator }} />
+              <span className="text-[9px] font-medium uppercase tracking-wide" style={{ color: RISK[level].text }}>
                 {RISK[level].label}
               </span>
             </div>
           ))}
         </div>
-      </div>
 
-      {/* ── Main content ── */}
-      <div className="lg:max-w-5xl lg:mx-auto lg:w-full lg:px-6 lg:py-6">
-
-        {/* Desktop: two column */}
-        <div className="lg:grid lg:grid-cols-[1fr_320px] lg:gap-6">
-
-          {/* LEFT — Map */}
-          <div className="flex flex-col">
-            {/* Desktop: risk strip above map */}
-            <div className="hidden lg:grid grid-cols-5 gap-2 mb-4">
-              {RISK_ORDER.map(level => (
-                <div key={level} className="flex flex-col items-center gap-1.5 py-3 rounded-xl border border-[#E5E7EB] bg-white hover:bg-[#F8FAFC] transition-colors duration-150 cursor-default">
-                  <span className="text-2xl font-bold text-[#0F172A] leading-none">{summary.counts[level] ?? 0}</span>
-                  <span className="w-2 h-2 rounded-sm" style={{ background: RISK[level].indicator }} />
-                  <span className="text-[10px] font-semibold text-center" style={{ color: RISK[level].text }}>
-                    {RISK[level].label}
-                  </span>
+        {/* Bunky */}
+        <div className="flex items-center gap-2.5 px-5 py-3 flex-1 overflow-x-auto min-w-0">
+          {cells.length === 0 ? (
+            <span className="text-[12px] text-[#94A3B8]">Žiadne aktívne búrkové bunky</span>
+          ) : (
+            cells.slice(0, 5).map(cell => (
+              <div key={cell.id}
+                className="flex items-center gap-2 border border-[#E5E7EB] rounded-xl px-3 py-2 bg-[#F8FAFC] flex-shrink-0 hover:border-[#CBD5E1] transition-colors duration-150 cursor-default">
+                <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: dbzToColor(cell.dbz) }} />
+                <div className="leading-none">
+                  <div className="text-[12px] font-bold text-[#0F172A]">{cell.dbz.toFixed(0)} dBZ</div>
+                  <div className="text-[10px] text-[#64748B] mt-0.5">{cell.speedKmh} km/h · {cell.trajectory[0]?.etaMin ?? '—'}min</div>
                 </div>
-              ))}
-            </div>
-
-            {/* Map */}
-            <div className="relative bg-white lg:rounded-xl lg:overflow-hidden lg:border lg:border-[#E5E7EB]">
-              <HailMap
-                riskBySlug={riskBySlug}
-                cells={cells}
-                className="h-[250px] lg:h-[420px]"
-              />
-            </div>
-            <p className="text-[11px] text-[#64748B] text-center mt-2 lg:mt-2 px-4 lg:px-0">
-              Kliknite na kraj pre detail · Dáta: <a href="https://github.com/drakh/slovakia-gps-data" className="underline hover:text-[#0F172A]" target="_blank" rel="noopener noreferrer">CC BY 4.0 drakh/slovakia-gps-data</a>
-            </p>
-          </div>
-
-          {/* RIGHT — Hazard panel */}
-          <div className="mt-2 lg:mt-0 flex flex-col gap-3">
-
-            {/* Hazard bars */}
-            <div className="bg-white px-4 py-4 border-b border-[#E5E7EB] lg:rounded-xl lg:border lg:border-[#E5E7EB]">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wider">Aktuálna situácia</span>
+                <span className="text-[10px] font-semibold leading-none ml-1" style={{ color: dbzToColor(cell.dbz) }}>
+                  {dbzToRisk(cell.dbz)}
+                </span>
               </div>
-              <div className="flex flex-col gap-3.5">
-                <HazardBar label="Krúpy" value={summary.totalHazards.krupy} Icon={CloudHail} />
-                <HazardBar label="Búrky" value={summary.totalHazards.burky} Icon={CloudLightning} />
-                <HazardBar label="Silný vietor" value={summary.totalHazards.vietor} Icon={Wind} />
-                <HazardBar label="Prívalový dážď" value={summary.totalHazards.dazd} Icon={CloudRain} />
-              </div>
-            </div>
-
-            {/* Worst region card */}
-            <div className="bg-white px-4 py-3.5 border-b border-[#E5E7EB] lg:rounded-xl lg:border lg:border-[#E5E7EB]">
-              <span className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wider block mb-2.5">Najvyššie riziko</span>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-[15px] font-bold text-[#0F172A] leading-tight">{summary.worst.name}</div>
-                  <div className="mt-1"><RiskBadge level={summary.worst.risk} /></div>
-                </div>
-                <Link href={`/${summary.worst.slug}`} className="text-xs font-semibold text-[#A3113A] hover:text-[#7F0D2D] transition-colors duration-150 cursor-pointer">
-                  Detail →
-                </Link>
-              </div>
-            </div>
-
-            {/* CTA — desktop only inside panel */}
-            <div className="hidden lg:flex items-center gap-3 bg-[#A3113A] rounded-xl px-4 py-3.5">
-              <Bell size={18} color="white" strokeWidth={1.75} className="flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="text-white text-sm font-semibold leading-tight">Nikdy nezmeškajte výstrahu.</div>
-                <div className="text-white/70 text-[11px] mt-0.5">Upozornenia iba pre váš okres.</div>
-              </div>
-              <button className="bg-white text-[#A3113A] text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer hover:bg-[#FFF1F2] transition-colors duration-150 whitespace-nowrap flex-shrink-0">
-                Zapnúť
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Mobile: CTA + quick stats ── */}
-      <div className="lg:hidden">
-        <div className="grid grid-cols-3 gap-px bg-[#E5E7EB] border-t border-[#E5E7EB]">
-          {[
-            { label: 'Aktívne výstrahy', value: '4', color: '#EF4444', href: '/upozornenia' },
-            { label: 'Bez rizika', value: String(summary.counts.none ?? 0), color: '#22C55E', href: '/' },
-            { label: 'Detail mapy', value: 'Graf', color: '#A3113A', href: '/mapa' },
-          ].map(({ label, value, color, href }) => (
-            <Link key={label} href={href} className="bg-white px-3 py-3.5 flex flex-col items-center gap-1 cursor-pointer hover:bg-[#F8FAFC] transition-colors duration-150">
-              <span className="text-lg font-bold leading-none" style={{ color }}>{value}</span>
-              <span className="text-[10px] text-[#64748B] text-center leading-tight">{label}</span>
-            </Link>
-          ))}
+            ))
+          )}
         </div>
 
-        <div className="mx-4 my-4 rounded-xl bg-[#A3113A] px-4 py-3.5 flex items-center gap-3">
-          <Bell size={18} color="white" strokeWidth={1.75} className="flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="text-white text-sm font-semibold leading-tight">Nikdy nezmeškajte výstrahu.</div>
-            <div className="text-white/70 text-[11px] mt-0.5">Upozornenia iba pre váš okres.</div>
+        {/* CTA */}
+        <div className="flex items-center gap-3 px-5 py-3 flex-shrink-0">
+          <Bell size={15} className="text-[#A3113A]" strokeWidth={1.75} />
+          <div className="leading-none">
+            <div className="text-[12px] font-semibold text-[#0F172A]">Upozornenia pre váš okres</div>
+            <div className="text-[10px] text-[#64748B] mt-0.5">Nikdy nezmeškajte výstrahu</div>
           </div>
-          <button className="bg-white text-[#A3113A] text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer flex-shrink-0 hover:bg-[#FFF1F2] transition-colors duration-150 whitespace-nowrap">
+          <button className="bg-[#A3113A] text-white text-[11px] font-semibold px-3 py-1.5 rounded-lg cursor-pointer hover:bg-[#7F0D2D] transition-colors duration-150 whitespace-nowrap flex-shrink-0">
             Zapnúť
           </button>
         </div>
       </div>
 
-      {/* ── Disclaimer ── */}
-      <p className="text-[11px] text-[#64748B] text-center px-4 pb-8 lg:pb-6 lg:max-w-5xl lg:mx-auto leading-relaxed">
-        Indikatívny výpočet z radarových dát — nie je to varovanie SHMÚ.{' '}
-        <a href="https://www.shmu.sk" className="underline hover:text-[#0F172A] transition-colors" target="_blank" rel="noopener noreferrer">shmu.sk</a>
-      </p>
-    </div>
+      {/* ── MOBILE CONTENT ──────────────────────────────────────────────── */}
+      <div className="lg:hidden">
+
+        {/* Aktívne bunky */}
+        {cells.length > 0 && (
+          <div className="bg-white border-b border-[#E5E7EB]">
+            <div className="flex items-center justify-between px-4 pt-3.5 pb-2">
+              <span className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wider">Aktívne bunky</span>
+              <span className="text-[11px] font-semibold text-[#0F172A]">{cells.length}</span>
+            </div>
+            <div className="divide-y divide-[#F1F5F9]">
+              {cells.slice(0, 3).map(cell => (
+                <div key={cell.id} className="flex items-center gap-3 px-4 py-3">
+                  <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: dbzToColor(cell.dbz) }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-semibold text-[#0F172A]">{cell.dbz.toFixed(0)} dBZ · {cell.speedKmh} km/h</div>
+                    <div className="text-[11px] text-[#64748B]">ETA {cell.trajectory[0]?.etaMin ?? '—'} min</div>
+                  </div>
+                  <span className="text-[11px] font-semibold flex-shrink-0" style={{ color: dbzToColor(cell.dbz) }}>
+                    {dbzToRisk(cell.dbz)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Hazardy */}
+        <div className="bg-white border-b border-[#E5E7EB] px-4 py-4">
+          <div className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wider mb-3">Aktuálna situácia</div>
+          <div className="flex flex-col gap-3">
+            {HAZARDS.map(({ label, key, Icon }) => {
+              const val = summary.totalHazards[key]
+              const color = barColor(val)
+              return (
+                <div key={key} className="flex items-center gap-3">
+                  <Icon size={14} strokeWidth={1.75} className="text-[#94A3B8] flex-shrink-0" />
+                  <span className="text-[12px] text-[#0F172A] flex-shrink-0 w-28">{label}</span>
+                  <div className="flex-1 h-1.5 rounded-full bg-[#E5E7EB] overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${val}%`, background: color }} />
+                  </div>
+                  <span className="text-[12px] font-semibold tabular-nums w-8 text-right flex-shrink-0" style={{ color }}>
+                    {val}%
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Krajové linky */}
+        <div className="bg-white border-b border-[#E5E7EB] divide-y divide-[#F1F5F9]">
+          {MOCK_KRAJE.slice(0, 4).map(k => (
+            <Link key={k.slug} href={`/${k.slug}`}
+              className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-[#F8FAFC] transition-colors duration-150">
+              <span className="text-[13px] text-[#0F172A]">{k.name}</span>
+              <RiskBadge level={k.risk} />
+            </Link>
+          ))}
+        </div>
+
+        {/* CTA */}
+        <div className="mx-4 my-4 bg-[#A3113A] rounded-xl px-4 py-3.5 flex items-center gap-3">
+          <Bell size={18} color="white" strokeWidth={1.75} className="flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-white text-[14px] font-semibold leading-tight">Nikdy nezmeškajte výstrahu.</div>
+            <div className="text-white/70 text-[11px] mt-0.5">Upozornenia iba pre váš okres.</div>
+          </div>
+          <button className="bg-white text-[#A3113A] text-[12px] font-semibold px-3 py-1.5 rounded-lg cursor-pointer flex-shrink-0">
+            Zapnúť
+          </button>
+        </div>
+
+        <p className="text-[10px] text-[#94A3B8] text-center px-4 pb-6">
+          Indikatívny výpočet · nie je to varovanie SHMÚ ·{' '}
+          <a href="https://www.shmu.sk" className="underline" target="_blank" rel="noopener noreferrer">shmu.sk</a>
+        </p>
+      </div>
     </>
   )
 }
