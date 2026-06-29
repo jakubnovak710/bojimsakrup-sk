@@ -2,11 +2,10 @@ import { Bell, CloudHail, CloudLightning, Wind, CloudRain } from 'lucide-react'
 import { HailMap } from '@/components/HailMap'
 import { RiskBadge } from '@/components/RiskBadge'
 import { JsonLd } from '@/components/JsonLd'
-import { MOCK_KRAJE, getSlovakiaSummary } from '@/lib/mock-data'
 import { RISK, type RiskLevel } from '@/lib/types'
 import { fetchStormCells } from '@/lib/cells-api'
 import { dbzToColor, dbzToRisk } from '@/lib/storm-cells'
-import { deriveRiskBySlug, mergeRisk } from '@/lib/risk-from-cells'
+import { fetchAllKrajeWeather, weatherToRiskBySlug, wmoLabel } from '@/lib/weather-api'
 import Link from 'next/link'
 
 const BASE = 'https://bojimsakrup.sk'
@@ -34,15 +33,23 @@ function formatTime(iso: string) {
 }
 
 export default async function HomePage() {
-  const summary = getSlovakiaSummary()
-  const cells = await fetchStormCells()
+  // Paralelné načítanie: počasie všetkých krajov + radar bunky
+  const [krajeWeather, cells] = await Promise.all([
+    fetchAllKrajeWeather(),
+    fetchStormCells(),
+  ])
 
-  // Odvoď riziko z reálnych buniek — prepisuje mock hodnoty kde máme dáta
-  const realRisk = deriveRiskBySlug(cells)
-  const riskBySlug = mergeRisk(
-    Object.fromEntries(MOCK_KRAJE.map(k => [k.slug, k.risk])),
-    realRisk,
+  // riskBySlug z reálnych dát: CAPE + WMO kódy z Open-Meteo
+  const riskBySlug = weatherToRiskBySlug(krajeWeather)
+
+  // Súhrn Slovenska
+  const counts = Object.values(riskBySlug).reduce(
+    (acc, r) => { acc[r] = (acc[r] ?? 0) + 1; return acc },
+    {} as Record<RiskLevel, number>
   )
+  const RISK_NUM: Record<RiskLevel, number> = { none: 0, low: 1, medium: 2, high: 3, extreme: 4 }
+  const worstKraj = krajeWeather.sort((a, b) => RISK_NUM[b.risk] - RISK_NUM[a.risk])[0]
+  const updatedAt = krajeWeather[0]?.updatedAt ?? new Date().toISOString()
 
   const websiteJsonLd = {
     '@context': 'https://schema.org',
@@ -63,7 +70,7 @@ export default async function HomePage() {
           <div className="text-[16px] font-bold text-[#0F172A] tracking-tight leading-none">
             BOJÍMSA<span className="text-[#A3113A]">KRÚP</span>.SK
           </div>
-          <div className="text-[11px] text-[#64748B] mt-0.5">Akt. {formatTime(summary.updatedAt)}</div>
+          <div className="text-[11px] text-[#64748B] mt-0.5">Akt. {formatTime(updatedAt)}</div>
         </div>
         <div className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-sm bg-[#EF4444] animate-pulse" />
@@ -77,34 +84,31 @@ export default async function HomePage() {
         <div className="flex items-center gap-2 px-5 border-r border-[#E5E7EB] h-full flex-shrink-0">
           <span className="w-1.5 h-1.5 rounded-sm bg-[#EF4444] animate-pulse" />
           <span className="text-[12px] font-semibold text-[#0F172A] whitespace-nowrap">
-            {formatTime(summary.updatedAt)}
+            {formatTime(updatedAt)}
           </span>
         </div>
 
-        {/* Hazardy s mini progress barmi */}
-        {HAZARDS.map(({ label, key, Icon }) => {
-          const val = summary.totalHazards[key]
-          const color = barColor(val)
-          return (
-            <div key={key} className="flex items-center gap-2 px-4 border-r border-[#E5E7EB] h-full flex-shrink-0">
-              <Icon size={13} strokeWidth={1.75} className="text-[#94A3B8]" />
-              <span className="text-[12px] text-[#64748B] whitespace-nowrap">{label}</span>
-              <div className="w-14 h-1 rounded-full bg-[#E5E7EB] overflow-hidden">
-                <div className="h-full rounded-full" style={{ width: `${val}%`, background: color }} />
-              </div>
-              <span className="text-[12px] font-semibold tabular-nums" style={{ color }}>{val}%</span>
-            </div>
-          )
-        })}
+        {/* Top kraje s rizikom */}
+        {krajeWeather.slice(0, 4).map(k => (
+          <Link key={k.slug} href={`/${k.slug}`}
+            className="flex items-center gap-2 px-4 border-r border-[#E5E7EB] h-full flex-shrink-0 hover:bg-[#F8FAFC] transition-colors cursor-pointer">
+            <RiskBadge level={k.risk} />
+            <span className="text-[11px] text-[#64748B] whitespace-nowrap">
+              {wmoLabel(k.wmoCode)} · CAPE {k.capePeak}
+            </span>
+          </Link>
+        ))}
 
         <div className="flex-1" />
 
         {/* Najhoršie riziko */}
-        <div className="flex items-center gap-2.5 px-5 border-l border-[#E5E7EB] h-full flex-shrink-0">
-          <span className="text-[11px] text-[#64748B]">Najvyššie</span>
-          <span className="text-[12px] font-semibold text-[#0F172A]">{summary.worst.name}</span>
-          <RiskBadge level={summary.worst.risk} />
-        </div>
+        {worstKraj && (
+          <div className="flex items-center gap-2.5 px-5 border-l border-[#E5E7EB] h-full flex-shrink-0">
+            <span className="text-[11px] text-[#64748B]">Najvyššie</span>
+            <span className="text-[12px] font-semibold text-[#0F172A]">{worstKraj.slug.replace('-kraj','').replace('ky','ký').replace('sky','ský')}</span>
+            <RiskBadge level={worstKraj.risk} />
+          </div>
+        )}
       </div>
 
       {/* ── MOBILE RISK TILES ──────────────────────────────────────────── */}
@@ -112,7 +116,7 @@ export default async function HomePage() {
         {RISK_ORDER.map(level => (
           <div key={level} className="flex flex-col items-center gap-0.5 py-2.5 bg-white">
             <span className="text-[15px] font-bold leading-none text-[#0F172A]">
-              {summary.counts[level] ?? 0}
+              {counts[level] ?? 0}
             </span>
             <span className="w-2 h-2 rounded-sm mt-0.5" style={{ background: RISK[level].indicator }} />
           </div>
@@ -133,7 +137,7 @@ export default async function HomePage() {
         <div className="flex items-center gap-5 px-6 py-3.5 flex-shrink-0">
           {RISK_ORDER.map(level => (
             <div key={level} className="flex flex-col items-center gap-1">
-              <span className="text-xl font-bold leading-none text-[#0F172A]">{summary.counts[level] ?? 0}</span>
+              <span className="text-xl font-bold leading-none text-[#0F172A]">{counts[level] ?? 0}</span>
               <span className="w-2 h-2 rounded-sm" style={{ background: RISK[level].indicator }} />
               <span className="text-[9px] font-medium uppercase tracking-wide" style={{ color: RISK[level].text }}>
                 {RISK[level].label}
@@ -203,38 +207,25 @@ export default async function HomePage() {
           </div>
         )}
 
-        {/* Hazardy */}
-        <div className="bg-white border-b border-[#E5E7EB] px-4 py-4">
-          <div className="text-[11px] font-semibold text-[#64748B] uppercase tracking-wider mb-3">Aktuálna situácia</div>
-          <div className="flex flex-col gap-3">
-            {HAZARDS.map(({ label, key, Icon }) => {
-              const val = summary.totalHazards[key]
-              const color = barColor(val)
-              return (
-                <div key={key} className="flex items-center gap-3">
-                  <Icon size={14} strokeWidth={1.75} className="text-[#94A3B8] flex-shrink-0" />
-                  <span className="text-[12px] text-[#0F172A] flex-shrink-0 w-28">{label}</span>
-                  <div className="flex-1 h-1.5 rounded-full bg-[#E5E7EB] overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${val}%`, background: color }} />
-                  </div>
-                  <span className="text-[12px] font-semibold tabular-nums w-8 text-right flex-shrink-0" style={{ color }}>
-                    {val}%
-                  </span>
-                </div>
-              )
-            })}
+        {/* Kraj situácia z reálnych dát */}
+        <div className="bg-white border-b border-[#E5E7EB]">
+          <div className="px-4 pt-3.5 pb-2 text-[11px] font-semibold text-[#64748B] uppercase tracking-wider">
+            Situácia krajov
           </div>
-        </div>
-
-        {/* Krajové linky */}
-        <div className="bg-white border-b border-[#E5E7EB] divide-y divide-[#F1F5F9]">
-          {MOCK_KRAJE.slice(0, 4).map(k => (
-            <Link key={k.slug} href={`/${k.slug}`}
-              className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-[#F8FAFC] transition-colors duration-150">
-              <span className="text-[13px] text-[#0F172A]">{k.name}</span>
-              <RiskBadge level={k.risk} />
-            </Link>
-          ))}
+          <div className="divide-y divide-[#F1F5F9]">
+            {krajeWeather.slice(0, 4).map(k => (
+              <Link key={k.slug} href={`/${k.slug}`}
+                className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-[#F8FAFC] transition-colors">
+                <div>
+                  <div className="text-[13px] font-medium text-[#0F172A] capitalize">
+                    {k.slug.replace('-kraj','').replace('sky','ský').replace('ky','ký')}
+                  </div>
+                  <div className="text-[11px] text-[#64748B]">{wmoLabel(k.wmoCode)} · CAPE {k.capePeak} J/kg</div>
+                </div>
+                <RiskBadge level={k.risk} />
+              </Link>
+            ))}
+          </div>
         </div>
 
         {/* CTA */}

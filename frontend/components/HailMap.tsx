@@ -75,6 +75,7 @@ export function HailMap({ riskBySlug, cells = [], className = '' }: Props) {
       style: {
         version: 8,
         sources: {
+          // Podkladová mapa bez labelov (labely idú NAD radar)
           carto: {
             type: 'raster',
             tiles: [
@@ -84,10 +85,20 @@ export function HailMap({ riskBySlug, cells = [], className = '' }: Props) {
             tileSize: 256,
             attribution: '© OpenStreetMap © CARTO',
           },
+          // Len labely — vrstvia sa nad radar aby zostali čitateľné
+          labels: {
+            type: 'raster',
+            tiles: [
+              'https://a.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}@2x.png',
+              'https://b.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}@2x.png',
+            ],
+            tileSize: 256,
+          },
         },
         layers: [
-          { id: 'bg',   type: 'background', paint: { 'background-color': '#EFF1F5' } },
-          { id: 'base', type: 'raster',     source: 'carto', paint: { 'raster-opacity': 0.92 } },
+          { id: 'bg',     type: 'background', paint: { 'background-color': '#EFF1F5' } },
+          { id: 'base',   type: 'raster', source: 'carto',   paint: { 'raster-opacity': 0.90 } },
+          // labels sa pridajú neskôr ako posledná vrstva (nad radars, nad okresy)
         ],
       },
       center: [19.3, 48.72],
@@ -148,20 +159,42 @@ export function HailMap({ riskBySlug, cells = [], className = '' }: Props) {
           setRadarFrame(map, pastFrames[pastFrames.length - 1].path)
         }
 
-        // ── Hover na okresoch ───────────────────────────────────────
+        // ── Labely miest NAD radaron ────────────────────────────────
+        // Pridávame ako poslednú raster vrstvu — nad radar, nad okresy
+        map.addLayer({
+          id: 'labels',
+          type: 'raster',
+          source: 'labels',
+          paint: { 'raster-opacity': 1.0 },
+        })
+
+        // ── Hover na okresoch — globálny event kvôli raster labely layer ─
         let hoveredId: string | number | null = null
-        map.on('mousemove', 'okresy-fill', (e) => {
+
+        map.on('mousemove', (e) => {
+          const features = map.queryRenderedFeatures(e.point, { layers: ['okresy-fill'] })
+          if (features.length === 0) {
+            map.getCanvas().style.cursor = ''
+            if (hoveredId !== null) {
+              map.setFeatureState({ source: 'okresy', id: hoveredId }, { hover: false })
+              hoveredId = null
+            }
+            setOkTooltip(null)
+            return
+          }
+          const f = features[0]
           map.getCanvas().style.cursor = 'pointer'
-          const f = e.features?.[0]
-          if (!f || f.id === undefined) return
-          if (hoveredId !== null && hoveredId !== f.id)
-            map.setFeatureState({ source: 'okresy', id: hoveredId }, { hover: false })
-          hoveredId = f.id
-          map.setFeatureState({ source: 'okresy', id: hoveredId }, { hover: true })
+          if (f.id !== undefined && hoveredId !== f.id) {
+            if (hoveredId !== null)
+              map.setFeatureState({ source: 'okresy', id: hoveredId }, { hover: false })
+            hoveredId = f.id
+            map.setFeatureState({ source: 'okresy', id: hoveredId }, { hover: true })
+          }
           const p = f.properties as { NM3?: string; risk?: string }
           setOkTooltip({ x: e.point.x, y: e.point.y, name: p.NM3 ?? '', risk: (p.risk ?? 'none') as RiskLevel })
         })
-        map.on('mouseleave', 'okresy-fill', () => {
+
+        map.on('mouseleave', () => {
           map.getCanvas().style.cursor = ''
           if (hoveredId !== null)
             map.setFeatureState({ source: 'okresy', id: hoveredId }, { hover: false })
@@ -252,8 +285,9 @@ export function HailMap({ riskBySlug, cells = [], className = '' }: Props) {
         </div>
       )}
 
-      {/* Legenda */}
+      {/* Legenda rizika krajov */}
       <div className="absolute bottom-3 left-3 z-10 bg-white/95 border border-[#E5E7EB] rounded-lg px-2.5 py-2">
+        <div className="text-[9px] text-[#94A3B8] uppercase tracking-wide mb-1">Riziko krajov</div>
         <div className="flex items-center gap-1.5">
           {(['none', 'low', 'medium', 'high', 'extreme'] as RiskLevel[]).map(level => (
             <div key={level} className="flex flex-col items-center gap-0.5">
@@ -261,6 +295,23 @@ export function HailMap({ riskBySlug, cells = [], className = '' }: Props) {
               <span className="text-[9px]" style={{ color: RISK[level].text }}>
                 {RISK[level].label.split(' ')[0]}
               </span>
+            </div>
+          ))}
+        </div>
+        {/* Radar intenzita */}
+        <div className="text-[9px] text-[#94A3B8] uppercase tracking-wide mt-2 mb-1">Radar (dBZ)</div>
+        <div className="flex items-center gap-0.5">
+          {[
+            { color: '#00BFFF', label: '15' },
+            { color: '#00FF00', label: '25' },
+            { color: '#FFFF00', label: '35' },
+            { color: '#FF8C00', label: '45' },
+            { color: '#FF0000', label: '55' },
+            { color: '#CC00CC', label: '65+' },
+          ].map(({ color, label }) => (
+            <div key={label} className="flex flex-col items-center gap-0.5">
+              <span className="w-4 h-3 rounded-sm block" style={{ background: color }} />
+              <span className="text-[8px] text-[#64748B]">{label}</span>
             </div>
           ))}
         </div>
