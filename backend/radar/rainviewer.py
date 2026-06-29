@@ -17,9 +17,9 @@ RAINVIEWER_API = "https://api.rainviewer.com/public/weather-maps.json"
 # Bounding box Slovenska + okolie pre istotu
 SLOVAKIA_BBOX = {"lat_min": 47.5, "lat_max": 49.8, "lon_min": 16.5, "lon_max": 23.0}
 
-# Rainviewer tile size na zoom 6
+# Rainviewer tile size na zoom 7 — 4× viac pixelov, lepšia detekcia malých búrok
 TILE_SIZE = 256
-ZOOM = 6
+ZOOM = 7
 
 
 @dataclass
@@ -132,16 +132,46 @@ async def _fetch_single_frame(
 
 
 def _decode_png_to_array(content: bytes) -> np.ndarray | None:
-    """PNG bajty → grayscale float32 array [0-255]."""
+    """
+    Rainviewer RGBA PNG → dBZ float32 array.
+
+    Rainviewer kóduje intenzitu FAR­BOU (hue), nie alpha kanálom.
+    Alpha je binárna (0=čistá obloha, 255=zrážky).
+    Hue (OpenCV 0-180) mapovanie na dBZ:
+      hue ~0-5 nebo ~160-180 (červená) = ~65-70 dBZ
+      hue ~5-25  (oranžová)             = ~55-65 dBZ
+      hue ~25-45 (žltá)                 = ~45-55 dBZ
+      hue ~45-70 (žlto-zelená)          = ~35-45 dBZ
+      hue ~70-100 (zeleno-azúrová)      = ~25-35 dBZ
+      hue ~100-130 (azúrová/modrá)      = ~10-25 dBZ
+    """
     try:
         import cv2
         buf = np.frombuffer(content, dtype=np.uint8)
         img = cv2.imdecode(buf, cv2.IMREAD_UNCHANGED)
         if img is None:
             return None
-        if img.ndim == 3:
-            # RGBA → alpha kanál = intenzita v Rainviewer tiles
-            return img[:, :, 3].astype(np.float32)
+
+        if img.ndim == 3 and img.shape[2] == 4:
+            alpha = img[:, :, 3]
+            has_precip = alpha > 30
+
+            bgr = img[:, :, :3]
+            hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+            hue = hsv[:, :, 0].astype(np.float32)  # 0-180
+
+            # Červená má hue~0 aj ~170-180 — normalizujeme na škálu kde
+            # červená = 0, zelená = 60, modrá = 120 (inverzia pre intenzitu)
+            # Tmavočervená (hue>150) mapovanie na 0-10 pre účely výpočtu
+            hue_norm = np.where(hue > 150, 180.0 - hue, hue)  # 0=červená, 120=modrá
+
+            # Lineárna interpolácia: hue 0 → 70 dBZ, hue 120 → 10 dBZ
+            dbz_raw = 70.0 - hue_norm * (60.0 / 120.0)
+            dbz_raw = np.clip(dbz_raw, 5.0, 72.0)
+
+            dbz = np.where(has_precip, dbz_raw, 0.0)
+            return dbz.astype(np.float32)
+
         return img.astype(np.float32)
     except Exception:
         return None

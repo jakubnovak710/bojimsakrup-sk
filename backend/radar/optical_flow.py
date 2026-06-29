@@ -13,15 +13,15 @@ from scipy.ndimage import label, maximum_filter, minimum_filter
 from .rainviewer import RadarFrame
 
 
-DBZ_THRESHOLD = 30.0    # minimálna intenzita pre deteciu bunky (rain)
+DBZ_THRESHOLD = 25.0    # minimálna intenzita pre deteciu bunky
 HAIL_DBZ = 50.0         # prah pre riziko krupobitia
-MIN_CELL_AREA_PX = 20   # minimum pixelov pri zoom 6 (cca 30 km²)
+MIN_CELL_AREA_PX = 15   # minimum pixelov pri zoom 7 (cca 8 km²)
 
-# Slovensko + 250 km buffer — filtrujeme len relevantné bunky
-_SK_LAT_MIN = 46.8
-_SK_LAT_MAX = 51.0
-_SK_LON_MIN = 14.5
-_SK_LON_MAX = 24.5
+# Slovensko + 30 km buffer (bunky blízko hranice ktoré môžu vchádzať)
+_SK_LAT_MIN = 47.4
+_SK_LAT_MAX = 49.9
+_SK_LON_MIN = 16.5
+_SK_LON_MAX = 22.9
 
 
 @dataclass
