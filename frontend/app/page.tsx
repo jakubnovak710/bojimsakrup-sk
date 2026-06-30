@@ -15,6 +15,17 @@ export const revalidate = 900
 const RISK_ORDER: RiskLevel[] = ['extreme', 'high', 'medium', 'low', 'none']
 const RISK_NUM_STRIP: Record<RiskLevel, number> = { none: 0, low: 1, medium: 2, high: 3, extreme: 4 }
 
+const KRAJ_NAMES: Record<string, string> = {
+  'bratislavsky-kraj':    'Bratislavský kraj',
+  'trnavsky-kraj':        'Trnavský kraj',
+  'trenciansky-kraj':     'Trenčiansky kraj',
+  'nitriansky-kraj':      'Nitriansky kraj',
+  'zilinsky-kraj':        'Žilinský kraj',
+  'banskobystricky-kraj': 'Banskobystrický kraj',
+  'presovsky-kraj':       'Prešovský kraj',
+  'kosicky-kraj':         'Košický kraj',
+}
+
 const HAZARDS = [
   { label: 'Krúpy',          key: 'krupy'  as const, Icon: CloudHail },
   { label: 'Búrky',          key: 'burky'  as const, Icon: CloudLightning },
@@ -108,7 +119,7 @@ export default async function HomePage() {
         {worstKraj && (
           <div className="flex items-center gap-2.5 px-5 border-l border-[#E5E7EB] h-full flex-shrink-0">
             <span className="text-[11px] text-[#64748B]">Najvyššie</span>
-            <span className="text-[12px] font-semibold text-[#0F172A]">{worstKraj.slug.replace('-kraj','').replace('ky','ký').replace('sky','ský')}</span>
+            <span className="text-[12px] font-semibold text-[#0F172A]">{(KRAJ_NAMES[worstKraj.slug] ?? worstKraj.slug).replace(' kraj', '')}</span>
             <RiskBadge level={worstKraj.risk} />
           </div>
         )}
@@ -216,12 +227,12 @@ export default async function HomePage() {
             Situácia krajov
           </div>
           <div className="divide-y divide-[#F1F5F9]">
-            {krajeWeather.slice(0, 4).map(k => (
+            {krajeWeather.map(k => (
               <Link key={k.slug} href={`/${k.slug}`}
                 className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-[#F8FAFC] transition-colors">
                 <div>
-                  <div className="text-[13px] font-medium text-[#0F172A] capitalize">
-                    {k.slug.replace('-kraj','').replace('sky','ský').replace('ky','ký')}
+                  <div className="text-[13px] font-medium text-[#0F172A]">
+                    {KRAJ_NAMES[k.slug] ?? k.slug}
                   </div>
                   <div className="text-[11px] text-[#64748B]">
                     {wmoLabel(k.wmoCode)} · {k.tempC}°C

@@ -6,6 +6,7 @@ import { JsonLd } from '@/components/JsonLd'
 import { RISK } from '@/lib/types'
 import { fetchAllKrajeWeather, fetchAllOkresyWeather, wmoLabel, hourLabel } from '@/lib/weather-api'
 import { okresyByKraj } from '@/lib/okresy-data'
+import { fetchMeteoAlerts, alertsForKraj, severityColor, severityLabel } from '@/lib/meteoalarm'
 import type { Metadata } from 'next'
 
 const BASE = 'https://bojimsakrup.sk'
@@ -47,11 +48,13 @@ export default async function KrajPage({ params }: Props) {
   const name = KRAJ_NAMES[kraj]
   if (!name) notFound()
 
-  // Paralelne: počasie kraja + počasie všetkých okresov tohto kraja
-  const [krajeWeather, okrWeather] = await Promise.all([
+  // Paralelne: počasie kraja + okresy + MeteoAlarm výstrahy (SHMÚ)
+  const [krajeWeather, okrWeather, allAlerts] = await Promise.all([
     fetchAllKrajeWeather(),
     fetchAllOkresyWeather(kraj),
+    fetchMeteoAlerts(),
   ])
+  const krajAlerts = alertsForKraj(allAlerts, kraj)
 
   const w = krajeWeather.find(k => k.slug === kraj)
   const r = w ? RISK[w.risk] : RISK.none
@@ -116,6 +119,26 @@ export default async function KrajPage({ params }: Props) {
             <Metric icon={<Wind size={14} strokeWidth={1.75} />} label="Vietor" value={`${w.windKmh} km/h`} sub={w.gustsKmh > w.windKmh ? `nárazov ${w.gustsKmh}` : undefined} />
             <Metric icon={<Droplets size={14} strokeWidth={1.75} />} label="Zrážky %" value={`${w.precipProb} %`} />
             <Metric icon={<CloudLightning size={14} strokeWidth={1.75} />} label="CAPE vrchol" value={`${w.capePeak} J/kg`} sub={w.capePeak > 0 ? `o ${hourLabel(w.capePeakHour)}` : undefined} />
+          </div>
+        )}
+
+        {/* MeteoAlarm — oficiálne výstrahy SHMÚ */}
+        {krajAlerts.length > 0 && (
+          <div className="mt-4 flex flex-col gap-2">
+            {krajAlerts.map(a => (
+              <div key={a.id}
+                className="rounded-xl border px-4 py-3 flex items-start gap-3"
+                style={{ background: `${severityColor(a.severity)}18`, borderColor: `${severityColor(a.severity)}55` }}>
+                <span className="w-2 h-2 rounded-sm mt-1 flex-shrink-0" style={{ background: severityColor(a.severity) }} />
+                <div className="min-w-0">
+                  <div className="text-[12px] font-semibold text-[#0F172A] leading-snug">{a.event}</div>
+                  <div className="text-[11px] text-[#64748B] mt-0.5">
+                    {a.areaDesc} · {severityLabel(a.severity)}
+                    {a.expires && ` · do ${new Date(a.expires).toLocaleTimeString('sk-SK', { hour: '2-digit', minute: '2-digit' })}`}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
